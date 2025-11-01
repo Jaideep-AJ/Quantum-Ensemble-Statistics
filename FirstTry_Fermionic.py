@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Physical constants
 KB = 1.3806452E-23
@@ -6,12 +7,12 @@ h = 6.636e-34
 hbar = h/(2*np.pi)
 
 # Simulation parameters
-N = 100
+N = 200
 T = 300
-mass = 1.99e-25 # Higgs Boson ... ?
+mass = 9.1e-31 # Higgs Boson ... ?
 L = 5e-9     # 5 nm
 MAX_QUANTUM_NUMBER = 10
-debug = True
+debug = False
 
 # Emax = 1.5*KB*T*N*1
 Emax = 1
@@ -118,8 +119,13 @@ class Microstate():
         new_energy = new_particle.E
         old_energy = concerned_particle.E
         delta_E = new_energy-old_energy
+        coin = np.random.random() 
+        to_accept = delta_E <= 0 or coin < np.exp(-delta_E/(KB*T))
+        if debug:
+            print(f'delta_E = {delta_E}; exp = {np.exp(-delta_E/(KB*T))}; coin={coin}')
+            print(f'{"Accep" if to_accept else "Rejec"}ting jump')
 
-        if delta_E <= 0 or np.random.random() < np.exp(-delta_E/(KB*T)):
+        if to_accept:
             # update particle state and system energy
             self.energy_map[concerned_particle.E] -= 1
             self.E -= concerned_particle.E
@@ -200,9 +206,35 @@ class Ensemble():
 def main():
     ens = Ensemble(N)
     ens.build_ensemble()
-    ens.system.print_stats()
-    ens.walk(1000)
+    print(f"Ensemble energy: {ens.system.E}")
+    labels = list(ens.system.energy_map.keys())
+    values = list(ens.system.energy_map.values())
+    plt.scatter(labels, values)
+    plt.xlabel('Energy')
+    plt.ylabel('Number of particles')
+    plt.title('Fermion Statistics (Initial)')
+    plt.show()
 
+    #ens.system.print_stats()
+    ens.walk(5000)
+    print(f"Ensemble energy: {ens.system.E}")
+    print(f"1.5 N.Kb.T = {1.5*N*KB*T}")
+    labels = list(ens.system.energy_map.keys())
+    values = list(ens.system.energy_map.values())
+    plt.scatter(labels, values)
+    plt.xlabel('Energy')
+    plt.ylabel('Number of particles')
+    plt.title('Fermion Statistics (Equilibrium, 6000 walks)')
+    plt.show()
+
+    ens.walk(40000)
+    labels = list(ens.system.energy_map.keys())
+    values = list(ens.system.energy_map.values())
+    plt.scatter(labels, values)
+    plt.xlabel('Energy')
+    plt.ylabel('Number of particles')
+    plt.title('Fermion Statistics (Final, 40000 walks)')
+    plt.show()
 
 if __name__ == '__main__':
     main()
