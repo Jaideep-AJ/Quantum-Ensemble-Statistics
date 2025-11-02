@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from tqdm import tqdm
 
 # Physical constants
 KB = 1.3806452E-23
@@ -9,7 +10,9 @@ hbar = h/(2*np.pi)
 
 # Simulation parameters
 N = 2000
-T = 900
+T = 3000
+steps_to_equilibrium = 50000
+steps_to_explore = 150000
 mass = 9.1e-31 # Higgs Boson ... ?
 L = 5e-9     # 5 nm
 MAX_QUANTUM_NUMBER = 13
@@ -220,7 +223,7 @@ class Ensemble():
         occupation_numbers = defaultdict(int)
         n_samples = 0
 
-        for i in range(n_trials):
+        for i in tqdm(range(n_trials)):
             chosen_one = np.random.randint(0, N)
             new_l = np.random.randint(1, MAX_QUANTUM_NUMBER + 1)
             new_m = np.random.randint(1, MAX_QUANTUM_NUMBER + 1)
@@ -280,7 +283,9 @@ def main():
     plt.show()
 
     #ens.system.print_stats()
-    ens.walk(100000, record_interval=-1)
+    print("Equilibriating...")
+    ens.walk(steps_to_equilibrium, record_interval=-1)
+    print()
     print(f"Ensemble energy: {ens.system.E}")
     print(f"1.5 N.Kb.T = {1.5*N*KB*T}")
     labels = list(ens.system.energy_map.keys())
@@ -291,7 +296,9 @@ def main():
     plt.title('Instantaneous Fermion Distribution (Equilibrium, 100000 walks)')
     plt.show()
 
-    avg_occ = ens.walk(1000000, record_interval=100)
+    print("Exploring the gamma space...")
+    avg_occ = ens.walk(steps_to_explore, record_interval=100)
+    print()
     print(f"Final ensemble energy: {ens.system.E}")
     print(f"1.5 N.Kb.T = {1.5 * N * KB * T}")
 
@@ -299,7 +306,7 @@ def main():
     avg_per_energy = avg_occ.values() # energy per state
     max_avg_occupation = max(avg_per_energy)
     energy_prob = [avg / max_avg_occupation for avg in avg_per_energy]
-    plt.scatter(energy, energy_prob)
+    plt.scatter(energy, energy_prob, label='Simulation', s=50, alpha=0.7)
     plt.xlabel('Energy')
     plt.ylabel('Occupation Probability per Quantum State')
     plt.title('Fermion Energy Distribution (Final)')
@@ -315,7 +322,9 @@ def main():
         fd_E.append(e)
         f_of_E = 1 / (np.exp((e - Ef) / (KB * T)) + 1)
         fd_f_of_E.append(f_of_E)
-    plt.plot(fd_E, fd_f_of_E, label='Fermi-Dirac Statistics', color='r')
+    plt.plot(fd_E, fd_f_of_E, label='Fermi-Dirac Statistics', 
+             color='r', linewidth=2, linestyle='--')
+    plt.legend()
     
     plt.show()
 
