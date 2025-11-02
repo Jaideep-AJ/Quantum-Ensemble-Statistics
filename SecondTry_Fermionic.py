@@ -14,11 +14,16 @@ L = 5e-9         # 5 nm
 MAX_QUANTUM_NUMBER = 13
 debug = False
 
+# round off margin
+eps = 3*h**2/(8*mass*L**2)
+n_places = np.floor(abs(np.log10(eps)))
+
 
 class Particle():
     def __init__(self, l, m, n, index):
         self.k = (l, m, n)
         self.E = (h ** 2) * (self.k[0] ** 2 + self.k[1] ** 2 + self.k[2] ** 2) / (8 * mass * L ** 2)
+        self.E = round(self.E, n_places-1)
         self.index = index
 
     def update_energy(self):
@@ -145,9 +150,9 @@ class Ensemble():
             "accepted": accepted,
             "rejected": rejected,
             "forbidden": forbidden,
-            "acceptance_rate": accepted / n_trials,
-            "rejectance_rate": rejected / n_trials,
-            "forbiddance_rate": forbidden / n_trials,
+            "acceptance_rate": round(accepted / n_trials, 2),
+            "rejectance_rate": round(rejected / n_trials, 2),
+            "forbiddance_rate": round(forbidden / n_trials, 2)
         }
 
         print("\n--- Simulation Summary ---")
