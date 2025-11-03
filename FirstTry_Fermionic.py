@@ -269,6 +269,36 @@ class Ensemble():
 
         return average_occupation_per_energy
 
+    def find_chemical_potential(self):
+        # Use the full degeneracy map (all single-particle (l,m,n) levels),
+        # and include the spin factor (2).
+        energies = np.array(sorted(self.system.degeneracy.keys()))
+        degeneracies = np.array([self.system.degeneracy[e] for e in energies], dtype=float)
+        degeneracies *= 2.0   # factor 2 for spin
+
+        # Fermi-Dirac expectation for total particle number
+        def expectation_N(mu):
+            f = 1.0 / (np.exp((energies - mu) / (KB * T)) + 1.0)
+            return np.sum(degeneracies * f)
+
+        # sensible bracket (mu increases => expectation_N increases)
+        mu_low = np.min(energies) - 10.0 * KB * T
+        mu_high = np.max(energies) + 10.0 * KB * T
+
+        # Sanity: if even at mu_high you don't reach N, increase mu_high
+        # (or raise an error)
+        if expectation_N(mu_high) < self.N:
+            raise RuntimeError("Not enough available single-particle states to accommodate N. Increase MAX_QUANTUM_NUMBER.")
+
+        # Bisection (correct direction)
+        for _ in range(200):
+            mu_mid = 0.5 * (mu_low + mu_high)
+            if expectation_N(mu_mid) < self.N:
+                mu_low = mu_mid     # increase mu to increase N
+            else:
+                mu_high = mu_mid
+        return 0.5 * (mu_low + mu_high)
+
 
 def main():
     ens = Ensemble(N)
@@ -315,7 +345,9 @@ def main():
     fd_E = []
     fd_f_of_E = []
     sorted_energy = sorted(energy)
-    Ef = sorted_energy[len(sorted_energy)//2]
+    #Ef = sorted_energy[len(sorted_energy)//2]
+    Ef = ens.find_chemical_potential()
+    print(f'Ef = {Ef}')
     #Ef = ens.Ef
     #Ef = energy[energy_prob.index(0.5)]
     for e in sorted_energy:

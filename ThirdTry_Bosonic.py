@@ -3,26 +3,39 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from tqdm import tqdm
 
+
 # Physical constants
 KB = 1.3806452E-23  # Boltzmann constant
 h = 6.636e-34  # Planck constant
-mass = 9.1e-31  # Electron mass
+
+# Choose your boson type:
+# Option 1: Helium-4 atoms (realistic BEC experiments)
+mass = 6.646e-27  # Helium-4 atom mass in kg
+
+# Option 2: Electron mass (lighter, for faster simulation)
+# mass = 9.1e-31  # Electron mass
+
 L = 5e-9  # Box length 5 nm
+
 
 # Energy scale: E0 = h^2/(8*m*L^2)
 E0 = h**2 / (8 * mass * L**2)
 
+
 # Simulation parameters
 N = 2000
-T = 300  # Temperature in Kelvin
+T = 200  # Temperature in Kelvin (lowered for stronger quantum effects)
 steps_to_equilibrium = 50000
 steps_to_explore = 150000
 MAX_QUANTUM_NUMBER = 13
 debug = False
 
+
 print(f"Energy scale E0 = {E0:.6e} J")
 print(f"Thermal energy kB*T = {KB*T:.6e} J")
 print(f"Ratio E0/(kB*T) = {E0/(KB*T):.6f}")
+print(f"Particle type: {'Helium-4' if mass > 1e-26 else 'Electron-like'}")
+
 
 class Particle():
     """
@@ -58,6 +71,7 @@ class Particle():
                 return False
         except Exception:
             return False
+
 
 class Microstate():
     """
@@ -183,6 +197,7 @@ class Microstate():
             print(f"{k}\t{len(self.particles_hashmap[k])}")
         print("____________________________________________")
 
+
 class Ensemble():
     def __init__(self, N):
         self.N = N
@@ -250,6 +265,97 @@ class Ensemble():
 
         return average_occupation_per_energy
 
+
+def find_mu_from_simulation(avg_occ, degeneracy_map, N, T_tilde):
+    """
+    Find chemical potential that matches simulation particle number
+
+    Parameters:
+    -----------
+    avg_occ : dict
+        Average occupation per quantum state from simulation {E_tilde: n_avg}
+    degeneracy_map : dict
+        Degeneracy for each energy level {E_tilde: g}
+    N : int
+        Total particle number
+    T_tilde : float
+        Normalized temperature kB*T/E0
+
+    Returns:
+    --------
+    mu_tilde : float
+        Normalized chemical potential mu/E0
+    """
+    energies = np.array(sorted(avg_occ.keys()))
+    n_sim = np.array([avg_occ[e] for e in energies])
+    g_vals = np.array([degeneracy_map[e] for e in energies], dtype=float)
+
+    # Total particles from simulation (should equal N)
+    N_check = np.sum(g_vals * n_sim)
+    print(f"Simulation particle count check: {N_check:.1f} (expected {N})")
+
+    # Find μ_tilde that reproduces this N using BE distribution
+    def total_particles(mu_tilde):
+        # BE distribution
+        exponent = (energies - mu_tilde) / T_tilde
+        # Avoid numerical issues
+        exponent = np.clip(exponent, 0.01, 100)
+        n_BE = 1.0 / (np.exp(exponent) - 1.0)
+        return np.sum(g_vals * n_BE)
+
+    # Bosons: mu must be less than ground state energy
+    E_ground = np.min(energies)
+    mu_high = E_ground - 1e-6
+    mu_low = E_ground - 100 * T_tilde
+
+    # Bisection search
+    for iteration in range(100):
+        mu_mid = 0.5 * (mu_low + mu_high)
+        N_mid = total_particles(mu_mid)
+        if N_mid > N:
+            mu_high = mu_mid
+        else:
+            mu_low = mu_mid
+
+        if abs(N_mid - N) < 0.01 * N:
+            break
+
+    mu_tilde = 0.5 * (mu_low + mu_high)
+    print(f"Converged after {iteration+1} iterations")
+    return mu_tilde
+
+
+def calculate_BE_distribution(energy_array, mu_tilde, T_tilde):
+    """
+    Calculate Bose-Einstein distribution for given energy array
+
+    Parameters:
+    -----------
+    energy_array : array-like
+        Energy values (normalized)
+    mu_tilde : float
+        Chemical potential (normalized)
+    T_tilde : float
+        Temperature (normalized)
+
+    Returns:
+    --------
+    be_occupation : array
+        Bose-Einstein occupation numbers
+    """
+    be_occupation = []
+    for e_tilde in energy_array:
+        exponent = (e_tilde - mu_tilde) / T_tilde
+        # Avoid numerical issues
+        if exponent > 0.01:
+            f_BE = 1.0 / (np.exp(exponent) - 1.0)
+        else:
+            # Near condensation - handle carefully
+            f_BE = T_tilde / (e_tilde - mu_tilde) if (e_tilde - mu_tilde) > 0 else 1e6
+        be_occupation.append(f_BE)
+    return np.array(be_occupation)
+
+
 def main():
     ens = Ensemble(N)
     ens.build_ensemble()
@@ -266,10 +372,10 @@ def main():
     plt.show()
 
     # Equilibration
-    print("Equilibriating...")
+    print("\nEquilibriating...")
     ens.walk(steps_to_equilibrium, record_interval=-1)
     print()
-    print(f"\nTotal normalized energy after equilibration: {ens.system.E_total}")
+    print(f"Total normalized energy after equilibration: {ens.system.E_total}")
     print(f"Average energy per particle: {ens.system.E_total/N:.2f}")
 
     labels = list(ens.system.energy_map.keys())
@@ -277,56 +383,115 @@ def main():
     plt.scatter(labels, values)
     plt.xlabel(r'Normalized Energy $\tilde{E} = l^2 + m^2 + n^2$')
     plt.ylabel('Number of Particles')
-    plt.title('Instantaneous Boson Distribution (Equilibrium, 100k walks)')
+    plt.title('Instantaneous Boson Distribution (After Equilibration)')
     plt.show()
 
     # Production run with recording
-    print("Exploring the gamma space...")
+    print("\nExploring the gamma space...")
     avg_occ = ens.walk(steps_to_explore, record_interval=100)
     print()
-    print(f"\nFinal total normalized energy: {ens.system.E_total}")
+    print(f"Final total normalized energy: {ens.system.E_total}")
     print(f"Average energy per particle: {ens.system.E_total/N:.2f}")
 
     energy = sorted(avg_occ.keys())  # normalized energies
     avg_per_energy = [avg_occ[e] for e in energy]  # average occupation per state
 
-    plt.scatter(energy, avg_per_energy, label='Simulation', s=50, alpha=0.7)
-    plt.xlabel(r'Normalized Energy $\tilde{E} = l^2 + m^2 + n^2$')
-    plt.ylabel('Average Occupation per Quantum State')
-    plt.title(f'Boson Energy Distribution (T={T}K, N={N})')
+    # === COMPARISON WITH BOSE-EINSTEIN STATISTICS ===
 
-    # Comparison with Bose-Einstein statistics
-    # For chemical potential μ ≈ 0 (non-degenerate case)
-    be_E = []
-    be_f_of_E = []
+    # Normalized temperature
+    T_tilde = KB * T / E0
+    print(f"\n{'='*50}")
+    print(f"=== Bose-Einstein Comparison ===")
+    print(f"{'='*50}")
+    print(f"Normalized temperature kBT/E0 = {T_tilde:.6f}")
 
-    for e_tilde in energy:
-        be_E.append(e_tilde)
-        # Bose-Einstein distribution with μ = 0
-        # f(E) = 1 / (exp(E*E0/(kB*T)) - 1)
-        exponent = e_tilde * E0 / (KB * T)
-        if exponent > 100:  # Avoid overflow, f(E) ≈ 0
-            f_of_E = 0
-        else:
-            f_of_E = 1 / (np.exp(exponent) - 1)
-        be_f_of_E.append(f_of_E)
+    # Extract chemical potential from simulation
+    mu_tilde = find_mu_from_simulation(avg_occ, ens.system.degeneracy, N, T_tilde)
+    print(f"Chemical potential μ/E0 = {mu_tilde:.6f}")
+    print(f"Ground state energy E_ground/E0 = {min(energy)}")
+    print(f"Difference (E_ground - μ)/E0 = {min(energy) - mu_tilde:.6f}")
 
-    # Check if we have valid BE values
-    if max(be_f_of_E) > 0:
-        # Normalize BE distribution to match simulation scale
-        max_sim = max(avg_per_energy)
-        max_be = max(be_f_of_E)
-        be_f_of_E_scaled = [f * (max_sim / max_be) for f in be_f_of_E]
+    # Check for condensation
+    ground_state_occupation = avg_occ.get(min(energy), 0)
+    condensate_fraction = ground_state_occupation / N * ens.system.degeneracy.get(min(energy), 1)
+    print(f"\nGround state occupation: {ground_state_occupation:.2f}")
+    print(f"Condensate fraction: {condensate_fraction*100:.2f}%")
+    if condensate_fraction > 0.1:
+        print("*** SIGNIFICANT CONDENSATION DETECTED ***")
 
-        plt.plot(be_E, be_f_of_E_scaled, label='Bose-Einstein', 
-                 color='r', linewidth=2, linestyle='--')
-        plt.legend()
-    else:
-        print("\nWARNING: Bose-Einstein distribution too small to plot.")
-        print(f"Temperature T={T}K may be too low for this energy scale.")
+    # Generate theoretical BE distribution at discrete levels
+    be_f_of_E = calculate_BE_distribution(energy, mu_tilde, T_tilde)
 
+    # Generate smooth BE curve for better visualization
+    energy_fine = np.linspace(min(energy), max(energy), 500)
+    be_f_fine = calculate_BE_distribution(energy_fine, mu_tilde, T_tilde)
+
+    # === PLOT 1: Linear scale with smooth curve ===
+    plt.figure(figsize=(12, 7))
+    plt.scatter(energy, avg_per_energy, label='MC Simulation', 
+                s=100, alpha=0.7, color='blue', zorder=3, edgecolors='darkblue')
+    plt.plot(energy_fine, be_f_fine, label='Bose-Einstein (smooth)', 
+             color='red', linewidth=2.5, linestyle='-', zorder=1)
+    plt.scatter(energy, be_f_of_E, label='BE at discrete levels', 
+                s=60, alpha=0.6, color='orange', marker='x', zorder=2, linewidths=2)
+    plt.xlabel(r'Normalized Energy $\tilde{E} = l^2 + m^2 + n^2$', fontsize=13)
+    plt.ylabel('Average Occupation per Quantum State', fontsize=13)
+    plt.title(f'Boson Distribution with Smooth BE Curve\n(T={T}K, N={N}, $\tilde{{T}}$={T_tilde:.3f})', 
+              fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11, loc='best')
     plt.grid(True, alpha=0.3)
+    plt.tight_layout()
     plt.show()
+
+    # === PLOT 2: Log scale ===
+    plt.figure(figsize=(12, 7))
+    plt.scatter(energy, avg_per_energy, label='MC Simulation', 
+                s=100, alpha=0.7, color='blue', zorder=3, edgecolors='darkblue')
+    plt.plot(energy_fine, be_f_fine, label='Bose-Einstein (smooth)', 
+             color='red', linewidth=2.5, linestyle='-', zorder=1)
+    plt.scatter(energy, be_f_of_E, label='BE at discrete levels', 
+                s=60, alpha=0.6, color='orange', marker='x', zorder=2, linewidths=2)
+    plt.xlabel(r'Normalized Energy $\tilde{E} = l^2 + m^2 + n^2$', fontsize=13)
+    plt.ylabel('Average Occupation per Quantum State (log scale)', fontsize=13)
+    plt.title(f'Boson Distribution - Log Scale\n(T={T}K, N={N}, $\tilde{{T}}$={T_tilde:.3f})', 
+              fontsize=14, fontweight='bold')
+    plt.yscale('log')
+    plt.legend(fontsize=11, loc='best')
+    plt.grid(True, alpha=0.3, which='both')
+    plt.tight_layout()
+    plt.show()
+
+    # === PLOT 3: Residual plot ===
+    residuals = []
+    for e_tilde, n_sim, n_be in zip(energy, avg_per_energy, be_f_of_E):
+        if n_be > 1e-10:  # Avoid division by very small numbers
+            rel_error = (n_sim - n_be) / n_be * 100
+            residuals.append(rel_error)
+        else:
+            residuals.append(0)
+
+    plt.figure(figsize=(12, 6))
+    plt.scatter(energy, residuals, s=80, alpha=0.7, color='purple', edgecolors='darkviolet')
+    plt.axhline(y=0, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    plt.xlabel(r'Normalized Energy $\tilde{E} = l^2 + m^2 + n^2$', fontsize=13)
+    plt.ylabel('Relative Error (%)', fontsize=13)
+    plt.title('Residual Analysis: (Simulation - Theory) / Theory × 100%', 
+              fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    # Print residual statistics
+    residuals_clean = [r for r in residuals if abs(r) < 1000]  # Remove outliers
+    print(f"\n{'='*50}")
+    print(f"=== Statistical Analysis ===")
+    print(f"{'='*50}")
+    print(f"Mean relative error: {np.mean(residuals_clean):.2f}%")
+    print(f"Standard deviation: {np.std(residuals_clean):.2f}%")
+    print(f"Max relative error: {np.max(np.abs(residuals_clean)):.2f}%")
+    print(f"\nNote: Lower temperatures will show better agreement and")
+    print(f"stronger quantum effects including potential condensation.")
+
 
 if __name__ == '__main__':
     main()
