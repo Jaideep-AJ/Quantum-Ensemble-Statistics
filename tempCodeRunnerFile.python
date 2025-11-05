@@ -1,0 +1,4 @@
+if not (1 <= new_state_k[0] <= MAX_QUANTUM_NUMBER and
+            #     1 <= new_state_k[1] <= MAX_QUANTUM_NUMBER and
+            #     1 <= new_state_k[2] <= MAX_QUANTUM_NUMBER):
+            #     return -1
