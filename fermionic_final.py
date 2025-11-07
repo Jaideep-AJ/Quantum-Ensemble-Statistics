@@ -166,10 +166,12 @@ class Microstate():
         
 
 class Ensemble():
-    def __init__(self, N):
+    def __init__(self, N, T):
         self.N = N
+        self.T = T
         self.system = Microstate(N)
         self.Ef = 0
+        self.occupation_history = None
 
     def build_ensemble(self):
         '''Builds a system of N fermions'''
@@ -185,6 +187,8 @@ class Ensemble():
                     self.system.add_particle(down_particle)
                     if id >= N:
                         self.Ef = up_particle.E
+                        # update occupation history
+                        self.occupation_history = self.system.energy_map
                         return
 
     def walk(self, n_trials, record_interval=200):
@@ -215,10 +219,7 @@ class Ensemble():
                     occupation_numbers[energy] += n_particles
                 n_samples += 1
 
-        average_occupation_per_energy = {}
-        for energy, n_particles in occupation_numbers.items():
-            degen = self.system.degeneracy.get(energy, 1)
-            average_occupation_per_energy[energy] = n_particles/(n_samples*degen)
+        self.update_average_occupation(occupation_numbers, n_samples)
                     
 
         # total_samples = max(1, (n_trials - equilibration_steps) // record_interval)
@@ -237,8 +238,6 @@ class Ensemble():
         print("\n--- Simulation Summary ---")
         for k, v in self.stats.items():
             print(f"{k:20s}: {v}")
-
-        return average_occupation_per_energy
 
     def find_chemical_potential(self):
         # Use the full degeneracy map (all single-particle (l,m,n) levels),
@@ -270,66 +269,72 @@ class Ensemble():
                 mu_high = mu_mid
         return 0.5 * (mu_low + mu_high)
 
+    def update_average_occupation(self, occupation_numbers:dict, n_samples:int):
+        average_occupation_per_energy = {}
+        for energy, n_particles in occupation_numbers.items():
+            degen = self.system.degeneracy.get(energy, 1)
+            average_occupation_per_energy[energy] = n_particles/(n_samples*degen)
+        self.occupation_history = average_occupation_per_energy
+
+    def plot_stats(self, title):
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(16,10))
+        labels = list(self.system.energy_map.keys())
+        values = list(self.system.energy_map.values())
+        ax[0].scatter(labels, values)
+        ax[0].set_xlabel('Energy')
+        ax[0].set_ylabel('Number of particles')
+        ax[0].set_title('Particle Distribution')
+        fig.suptitle(f'Fermion Statistics ({title}) N={self.N} T={T}')
+
+        energy = self.occupation_history.keys() # energies
+        avg_per_energy = self.occupation_history.values() # energy per state
+        max_avg_occupation = max(avg_per_energy)
+        energy_prob = [avg / max_avg_occupation for avg in avg_per_energy]
+        ax[1].scatter(energy, energy_prob, label='Simulation', s=50, alpha=0.7)
+        ax[1].set_xlabel('Energy')
+        ax[1].set_ylabel('Occupation Probability per Quantum State')
+        ax[1].set_title('Energy Distribution')
+
+        # comparison with fermi_dirac stats
+        fd_E = []
+        fd_f_of_E = []
+        sorted_energy = sorted(energy)
+        #Ef = sorted_energy[len(sorted_energy)//2]
+        Ef = self.find_chemical_potential()
+        print(f'Ef = {Ef}')
+        #Ef = ens.Ef
+        #Ef = energy[energy_prob.index(0.5)]
+        for e in sorted_energy:
+            fd_E.append(e)
+            f_of_E = 1 / (np.exp((e - Ef) / (KB * T)) + 1)
+            fd_f_of_E.append(f_of_E)
+        ax[1].plot(fd_E, fd_f_of_E, label='Fermi-Dirac Statistics', 
+                color='r', linewidth=2, linestyle='--')
+        ax[1].legend()
+
+        plt.show()
+
+
 
 def main():
-    ens = Ensemble(N)
+    ens = Ensemble(N, T)
+    
     ens.build_ensemble()
     print(f"Ensemble energy: {ens.system.E}")
-    labels = list(ens.system.energy_map.keys())
-    values = list(ens.system.energy_map.values())
-    plt.scatter(labels, values)
-    plt.xlabel('Energy')
-    plt.ylabel('Number of particles')
-    plt.title('Fermion Statistics (Initial)')
-    plt.show()
-
+    ens.plot_stats('Initial')
     #ens.system.print_stats()
+
     print("Equilibriating...")
-    ens.walk(steps_to_equilibrium, record_interval=-1)
-    print()
+    ens.walk(steps_to_equilibrium, record_interval=200)
+    ens.plot_stats('Equilibrium')
     print(f"Ensemble energy: {ens.system.E}")
     print(f"1.5 N.Kb.T = {1.5*N*KB*T}")
-    labels = list(ens.system.energy_map.keys())
-    values = list(ens.system.energy_map.values())
-    plt.scatter(labels, values)
-    plt.xlabel('Energy')
-    plt.ylabel('Number of particles')
-    plt.title('Instantaneous Fermion Distribution (Equilibrium, 100000 walks)')
-    plt.show()
 
-    print("Exploring the gamma space...")
-    avg_occ = ens.walk(steps_to_explore, record_interval=100)
-    print()
-    print(f"Final ensemble energy: {ens.system.E}")
-    print(f"1.5 N.Kb.T = {1.5 * N * KB * T}")
-
-    energy = avg_occ.keys() # energies
-    avg_per_energy = avg_occ.values() # energy per state
-    max_avg_occupation = max(avg_per_energy)
-    energy_prob = [avg / max_avg_occupation for avg in avg_per_energy]
-    plt.scatter(energy, energy_prob, label='Simulation', s=50, alpha=0.7)
-    plt.xlabel('Energy')
-    plt.ylabel('Occupation Probability per Quantum State')
-    plt.title('Fermion Energy Distribution (Final)')
-
-    # comparison with fermi_dirac stats
-    fd_E = []
-    fd_f_of_E = []
-    sorted_energy = sorted(energy)
-    #Ef = sorted_energy[len(sorted_energy)//2]
-    Ef = ens.find_chemical_potential()
-    print(f'Ef = {Ef}')
-    #Ef = ens.Ef
-    #Ef = energy[energy_prob.index(0.5)]
-    for e in sorted_energy:
-        fd_E.append(e)
-        f_of_E = 1 / (np.exp((e - Ef) / (KB * T)) + 1)
-        fd_f_of_E.append(f_of_E)
-    plt.plot(fd_E, fd_f_of_E, label='Fermi-Dirac Statistics', 
-             color='r', linewidth=2, linestyle='--')
-    plt.legend()
-    
-    plt.show()
+    print("Exploring gamma space...")
+    ens.walk(steps_to_explore, record_interval=100)
+    ens.plot_stats('Final')
+    print(f"Ensemble energy: {ens.system.E}")
+    print(f"1.5 N.Kb.T = {1.5*N*KB*T}")
 
 if __name__ == '__main__':
     main()
