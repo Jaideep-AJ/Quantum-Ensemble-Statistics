@@ -15,7 +15,7 @@ E0 = h**2 / (8 * mass * L**2)
 
 # Simulation parameters
 N = 5000
-T = 10  # Temperature in Kelvin
+T = 1  # Temperature in Kelvin
 steps_to_equilibrium = 50000
 steps_to_explore = 150000
 MAX_QUANTUM_NUMBER = 40

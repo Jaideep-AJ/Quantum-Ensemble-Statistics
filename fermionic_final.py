@@ -169,6 +169,10 @@ class Ensemble():
     def __init__(self, N, T):
         self.N = N
         self.T = T
+        self.L = L
+        self.mass = mass
+        self.hbar = hbar
+        self.KB = KB
         self.system = Microstate(N)
         self.Ef = 0
         self.occupation_history = None
@@ -268,6 +272,11 @@ class Ensemble():
             else:
                 mu_high = mu_mid
         return 0.5 * (mu_low + mu_high)
+    
+    def fermi_energy_zero_temperature(self):
+        n = self.N / (self.L ** 3)
+        EF0 = (self.hbar**2 / (2 * self.mass)) * (3 * np.pi**2 * n)**(2/3)
+        return EF0
 
     def update_average_occupation(self, occupation_numbers:dict, n_samples:int):
         average_occupation_per_energy = {}
@@ -301,7 +310,7 @@ class Ensemble():
         sorted_energy = sorted(energy)
         #Ef = sorted_energy[len(sorted_energy)//2]
         Ef = self.find_chemical_potential()
-        print(f'Ef = {Ef}')
+        print(f'Chemical potential μ(T) = {Ef}')
         #Ef = ens.Ef
         #Ef = energy[energy_prob.index(0.5)]
         for e in sorted_energy:
@@ -319,10 +328,12 @@ class Ensemble():
 def main():
     ens = Ensemble(N, T)
     
+    EF0 = ens.fermi_energy_zero_temperature()
+    print(f"EF(0 K) in J  : {EF0}")
+
     ens.build_ensemble()
     print(f"Ensemble energy: {ens.system.E}")
     ens.plot_stats('Initial')
-    #ens.system.print_stats()
 
     print("Equilibriating...")
     ens.walk(steps_to_equilibrium, record_interval=200)
